@@ -1,0 +1,5 @@
+(executable
+ (public_name webhook)
+ (name main)
+ (libraries webhook cohttp-lwt-unix lwt yojson )
+ (modes exe))
