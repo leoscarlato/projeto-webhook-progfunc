@@ -1,5 +1,6 @@
 (executable
  (public_name webhook)
  (name main)
- (libraries webhook cohttp-lwt-unix lwt yojson )
+ (modules db main)
+ (libraries webhook cohttp-lwt-unix lwt yojson sqlite3)
  (modes exe))

@@ -1,179 +1,129 @@
 open Lwt.Infix
 open Cohttp
 open Cohttp_lwt_unix
+open Yojson.Safe
+open Yojson.Safe.Util
+open Db
 
-(* Define o token que consideramos "válido". Pode ser sobrescrito pela variável de
-   ambiente WEBHOOK_TOKEN, ou ficará “meu-token-secreto” por padrão. *)
+(* Token de segurança (X-Webhook-Token) *)
 let expected_token =
-  match Sys.getenv_opt "WEBHOOK_TOKEN" with
-  | Some t -> t
-  | None   -> "meu-token-secreto"
+  Sys.getenv_opt "WEBHOOK_TOKEN"
+  |> Option.value ~default:"meu-token-secreto"
 
-(* Esta função tenta extrair o campo "transaction_id" como string, mesmo que os
-   outros campos (event, amount etc.) estejam faltando ou estejam com tipo errado.
-   Se transaction_id não existir ou não for string, retorna "" (string vazia). *)
-let extract_txn_id (json : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
-  try json |> member "transaction_id" |> to_string
-  with _ -> ""
+let confirmation_url = "http://127.0.0.1:5001/confirmar"
+let cancellation_url  = "http://127.0.0.1:5001/cancelar"
 
-(*Extrair campo "event" como string. Se não existir, ou não for string, devolve None. *)
-let extract_event (json : Yojson.Safe.t) : string option =
-  let open Yojson.Safe.Util in
-  try Some (json |> member "event" |> to_string)
+(* Extração de campos do JSON *)
+let extract_txn_id json    = try json |> member "transaction_id" |> to_string    with _ -> ""
+let extract_event  json    = try Some (json |> member "event"         |> to_string) with _ -> None
+let extract_amount json    =
+  try match json |> member "amount" with
+      | `String s -> Some (float_of_string s)
+      | `Float f  -> Some f
+      | `Int i    -> Some (float_of_int i)
+      | _         -> None
   with _ -> None
+let extract_currency json  = try Some (json |> member "currency"      |> to_string) with _ -> None
+let extract_timestamp json = try Some (json |> member "timestamp"     |> to_string) with _ -> None
 
-(*Extrair "amount", aceitando número ou string que possa converter *)
-let extract_amount (json : Yojson.Safe.t) : float option =
-  let open Yojson.Safe.Util in
-  try
-    match json |> member "amount" with
-    | `String s   -> Some (float_of_string s)
-    | `Float f    -> Some f
-    | `Int   i    -> Some (float_of_int i)
-    | _           -> None
-  with
-  | Failure _ -> None
-  | _ -> None
-
-(*Extrair "currency" como string, se existir *)
-let extract_currency (json : Yojson.Safe.t) : string option =
-  let open Yojson.Safe.Util in
-  try Some (json |> member "currency" |> to_string)
-  with _ -> None
-
-(*Extrair "timestamp" como string, se existir *)
-let extract_timestamp (json : Yojson.Safe.t) : string option =
-  let open Yojson.Safe.Util in
-  try Some (json |> member "timestamp" |> to_string)
-  with _ -> None
-
-let seen_transactions : (string, unit) Hashtbl.t = Hashtbl.create 1024
-
-(* Retorna false se txn_id já existe; caso contrário registra e devolve true *)
-let check_and_register_txn_id (txn_id : string) : bool =
-  if Hashtbl.mem seen_transactions txn_id then false
+(* Controle de duplicatas em memória *)
+let seen_txns = Hashtbl.create 1024
+let is_new_txn id =
+  if Hashtbl.mem seen_txns id then false
   else (
-    Hashtbl.add seen_transactions txn_id ();
+    Hashtbl.add seen_txns id ();
     true
   )
 
-let json_of_whole_payload (json : Yojson.Safe.t) : Yojson.Safe.t =
-  (* Devolve o mesmo JSON recebido*)
-  json
+(* Helper para resposta de cancelamento *)
+let respond_cancel json msg : (Response.t * Cohttp_lwt.Body.t) Lwt.t =
+  let id    = extract_txn_id    json in
+  let ev    = extract_event     json |> Option.value ~default:"" in
+  let amt   = extract_amount    json |> Option.value ~default:0.0 in
+  let cur   = extract_currency  json |> Option.value ~default:"" in
+  let ts    = extract_timestamp json |> Option.value ~default:"" in
+  (* Persiste como "cancelled" no DB *)
+  ignore (persist_txn ~id ~event:ev ~amount:amt ~currency:cur ~timestamp:ts ~status:"cancelled");
+  (* Dispara cancelamento via webhook async *)
+  Lwt.async (fun () ->
+    let headers = Header.init_with "Content-Type" "application/json" in
+    let body    = Yojson.Safe.to_string json |> Cohttp_lwt.Body.of_string in
+    Client.post ~headers ~body (Uri.of_string cancellation_url) >|= fun _ -> ()
+  );
+  (* Retorna 409 Conflict *)
+  Server.respond_string ~status:`Conflict ~body:msg ()
 
-let confirmation_url = "http://127.0.0.1:5001/confirmar"
-let cancellation_url = "http://127.0.0.1:5001/cancelar"
+(* Helper para resposta de confirmação *)
+let respond_confirm json : (Response.t * Cohttp_lwt.Body.t) Lwt.t =
+  let id    = extract_txn_id    json in
+  let ev    = extract_event     json |> Option.value ~default:"" in
+  let amt   = extract_amount    json |> Option.value ~default:0.0 in
+  let cur   = extract_currency  json |> Option.value ~default:"" in
+  let ts    = extract_timestamp json |> Option.value ~default:"" in
+  (* Persiste como "confirmed" no DB *)
+  ignore (persist_txn ~id ~event:ev ~amount:amt ~currency:cur ~timestamp:ts ~status:"confirmed");
+  (* Dispara confirmação via webhook async *)
+  Lwt.async (fun () ->
+    let headers = Header.init_with "Content-Type" "application/json" in
+    let body    = Yojson.Safe.to_string json |> Cohttp_lwt.Body.of_string in
+    Client.post ~headers ~body (Uri.of_string confirmation_url) >|= fun _ -> ()
+  );
+  (* Retorna 200 OK *)
+  Server.respond_string ~status:`OK ~body:"OK" ()
 
-let post_to_url ~(url:string) ~(body_json:Yojson.Safe.t) : unit Lwt.t =
-  let headers = Header.init_with "Content-Type" "application/json" in
-  let body_str = Yojson.Safe.to_string body_json in
-  let body = Cohttp_lwt.Body.of_string body_str in
-  Client.post ~headers ~body (Uri.of_string url) >>= fun (_resp, _resp_body) ->
-  Lwt.return_unit
-
-let callback _conn (req : Request.t) (body : Cohttp_lwt.Body.t)
+(* Callback principal *)
+let callback _conn (req:Request.t) (body:Cohttp_lwt.Body.t)
   : (Response.t * Cohttp_lwt.Body.t) Lwt.t =
-  let uri  = Request.uri req in
-  let path = Uri.path uri in
-  let meth = Request.meth req in
+  match Request.meth req, Uri.path (Request.uri req) with
+  | `POST, "/webhook" ->
+    (* Valida token *)
+    begin match Header.get (Request.headers req) "x-webhook-token" with
+    | None | Some "" ->
+      Server.respond_string ~status:`Unauthorized ~body:"Missing token" ()
+    | Some t when t <> expected_token ->
+      Server.respond_string ~status:`Unauthorized ~body:"Invalid token" ()
+    | Some _ ->
+      (*Lê corpo e parseia JSON*)
+      Cohttp_lwt.Body.to_string body >>= fun s ->
+      begin match
+        try Ok (from_string s) with Yojson.Json_error _ -> Error ()
+      with
+      | Error _ ->
+        Server.respond_string ~status:`Bad_request ~body:"Invalid JSON" ()
+      | Ok json ->
+        (*Extrai txn_id*)
+        let txn_id = extract_txn_id json in
 
-  (* Só atendemos POST em /webhook *)
-  if not (meth = `POST && path = "/webhook") then
-    let resp = Response.make ~status:`Not_found () in
-    Lwt.return (resp, Cohttp_lwt.Body.of_string "404: Not Found")
-  else
-    (* 7.1. Verifica cabeçalho “X-Webhook-Token” *)
-    let headers = Request.headers req in
-    let token_opt = Header.get headers "x-webhook-token" in
-    match token_opt with
-    | None ->
-        (* Sem cabeçalho => 401 Unauthorized *)
-        let resp = Response.make ~status:`Unauthorized () in
-        Lwt.return (resp, Cohttp_lwt.Body.of_string "Missing token")
-    | Some token_value ->
-        if token_value <> expected_token then
-          (* Token inválido => 401 Unauthorized *)
-          let resp = Response.make ~status:`Unauthorized () in
-          Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid token")
+        (* 3) Se missing id ou duplicata, trata sem chamar webhook adicional *)
+        if txn_id = "" then
+          respond_cancel json "Missing transaction_id"
+        else if not (is_new_txn txn_id) then
+          Server.respond_string ~status:`Conflict ~body:"Duplicate transaction" ()
         else
-          (* 7.2. Lê corpo inteiro como string *)
-          Cohttp_lwt.Body.to_string body >>= fun body_str ->
-          (* Se body for vazio (JSON “{}” ou string vazia), falha direto *)
-          let json_parsed =
-            try Ok (Yojson.Safe.from_string body_str)
-            with Yojson.Json_error _ -> Error "Malformed JSON"
-          in
-          match json_parsed with
-          | Error _ ->
-              (* Payload não é JSON válido => 400 Bad Request *)
-              let resp = Response.make ~status:`Conflict () in
-              Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid JSON")
+          (* transaction_id novo: checa event/amount/timestamp *)
+          begin match extract_event json, extract_amount json, extract_timestamp json with
+          | Some "payment_success", Some a, Some _ when a > 0.0 ->
+            respond_confirm json
+          | Some _, Some a, _ when a <= 0.0 ->
+            respond_cancel json "Invalid amount"
+          | _ ->
+            respond_cancel json "Missing or invalid fields"
+          end
+      end
+    end
 
-          | Ok json_obj ->
-              (* Extrai transaction_id mesmo que faltem outros campos *)
-              let txn_id = extract_txn_id json_obj in
-              if String.trim txn_id = "" then
-                (* Sem transaction_id: 400 Bad Request (não há como confirmar/cancelar) *)
-                let resp = Response.make ~status:`Conflict () in
-                Lwt.return (resp, Cohttp_lwt.Body.of_string "Missing transaction_id")
-              else
-                (* Agora temos um transaction_id não vazio. Podemos verificar duplicata. *)
-                if not (check_and_register_txn_id txn_id) then
-                  (* 2º POST com mesmo txn_id deve falhar (código ≠ 200). *)
-                  let resp = Response.make ~status:`Conflict () in
-                  Lwt.return (resp, Cohttp_lwt.Body.of_string "Duplicate transaction_id")
-                else
-                  (* transaction_id novo, token válido, JSON bem formado. 
-                     Agora precisamos extrair e validar os demais campos. *)
-
-                  (* 7.3. Extrair event, amount, currency, timestamp *)
-                  let event_opt     = extract_event json_obj in
-                  let amount_opt    = extract_amount json_obj in
-                  let currency_opt  = extract_currency json_obj in
-                  let timestamp_opt = extract_timestamp json_obj in
-
-                  (* Se faltar qualquer um desses, chamamos /cancelar e retornamos ≠ 200 *)
-                  match (event_opt, amount_opt, currency_opt, timestamp_opt) with
-                  | (Some event, Some amount, Some _currency, Some _timestamp) ->
-                      (* Todos os campos existem em algum formato *)
-                      if event <> "payment_success" then
-                        (* Evento “payment_failed” ou outro => cancelar *)
-                        let () = Lwt.async (fun () ->
-                          post_to_url ~url:cancellation_url ~body_json:(json_of_whole_payload json_obj)
-                        ) in
-                        let resp = Response.make ~status:`Conflict () in
-                        Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid event")
-
-                      else if amount <= 0.0 then
-                        (* amount = 0 ou negativo => cancelar *)
-                        let () = Lwt.async (fun () ->
-                          post_to_url ~url:cancellation_url ~body_json:(json_of_whole_payload json_obj)
-                        ) in
-                        let resp = Response.make ~status:`Conflict () in
-                        Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid amount")
-
-                      else
-                        (* Tudo ok => confirmar *)
-                        let () = Lwt.async (fun () ->
-                          post_to_url ~url:confirmation_url ~body_json:(json_of_whole_payload json_obj)
-                        ) in
-                        let resp = Response.make ~status:`OK () in
-                        Lwt.return (resp, Cohttp_lwt.Body.of_string "OK")
-
-                  | _ ->
-                      (* Algum campo faltando (event ou amount ou currency ou timestamp) => cancelar *)
-                      let () = Lwt.async (fun () ->
-                        post_to_url ~url:cancellation_url ~body_json:(json_of_whole_payload json_obj)
-                      ) in
-                      let resp = Response.make ~status:`Conflict () in
-                      Lwt.return (resp, Cohttp_lwt.Body.of_string "Missing fields")
-;;
-
-let port = 5000
+  | `GET, "/" ->
+    Server.respond_string ~status:`OK ~body:"Hello, OCaml Web Server!" ()
+  | `GET, "/about" ->
+    Server.respond_string ~status:`OK ~body:"About: simple OCaml server" ()
+  | _ ->
+    Server.respond_string ~status:`Not_found ~body:"404: Not Found" ()
 
 let () =
-  let mode   = `TCP (`Port port) in
-  let config = Server.make ~callback () in
-  Printf.printf "Servidor OCaml rodando em http://0.0.0.0:%d/webhook\n%!" port;
-  Lwt_main.run (Server.create ~mode config)
+  let port = 5000 in
+  Printf.printf "Servidor rodando em http://0.0.0.0:%d/webhook\n%!" port;
+  Lwt_main.run (
+    Server.create
+      ~mode:(`TCP (`Port port))
+      (Server.make ~callback ())
+  )

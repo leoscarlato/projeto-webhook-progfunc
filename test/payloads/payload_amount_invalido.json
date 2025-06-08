@@ -1,0 +1,7 @@
+{
+  "event": "payment_success",
+  "transaction_id": "txn-invalid-amount-001",
+  "amount": 0.00,
+  "currency": "BRL",
+  "timestamp": "2025-06-09T12:34:56Z"
+}

@@ -1,0 +1,6 @@
+{
+  "event": "payment_success",
+  "transaction_id": "no_ts_001",
+  "amount": 25.0,
+  "currency": "BRL"
+}
