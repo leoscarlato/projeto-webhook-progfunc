@@ -94,7 +94,7 @@ let callback _conn (req:Request.t) (body:Cohttp_lwt.Body.t)
         (*Extrai txn_id*)
         let txn_id = extract_txn_id json in
 
-        (* 3) Se missing id ou duplicata, trata sem chamar webhook adicional *)
+        (* Se missing id ou duplicata, trata sem chamar webhook adicional *)
         if txn_id = "" then
           respond_cancel json "Missing transaction_id"
         else if not (is_new_txn txn_id) then
@@ -113,9 +113,7 @@ let callback _conn (req:Request.t) (body:Cohttp_lwt.Body.t)
     end
 
   | `GET, "/" ->
-    Server.respond_string ~status:`OK ~body:"Hello, OCaml Web Server!" ()
-  | `GET, "/about" ->
-    Server.respond_string ~status:`OK ~body:"About: simple OCaml server" ()
+    Server.respond_string ~status:`OK ~body:"Servidor OCaml no ar!" ()
   | _ ->
     Server.respond_string ~status:`Not_found ~body:"404: Not Found" ()
 
