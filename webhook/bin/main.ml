@@ -107,7 +107,7 @@ let callback _conn (req : Request.t) (body : Cohttp_lwt.Body.t)
           match json_parsed with
           | Error _ ->
               (* Payload não é JSON válido => 400 Bad Request *)
-              let resp = Response.make ~status:`Bad_request () in
+              let resp = Response.make ~status:`Conflict () in
               Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid JSON")
 
           | Ok json_obj ->
@@ -115,7 +115,7 @@ let callback _conn (req : Request.t) (body : Cohttp_lwt.Body.t)
               let txn_id = extract_txn_id json_obj in
               if String.trim txn_id = "" then
                 (* Sem transaction_id: 400 Bad Request (não há como confirmar/cancelar) *)
-                let resp = Response.make ~status:`Bad_request () in
+                let resp = Response.make ~status:`Conflict () in
                 Lwt.return (resp, Cohttp_lwt.Body.of_string "Missing transaction_id")
               else
                 (* Agora temos um transaction_id não vazio. Podemos verificar duplicata. *)
@@ -142,7 +142,7 @@ let callback _conn (req : Request.t) (body : Cohttp_lwt.Body.t)
                         let () = Lwt.async (fun () ->
                           post_to_url ~url:cancellation_url ~body_json:(json_of_whole_payload json_obj)
                         ) in
-                        let resp = Response.make ~status:`Bad_request () in
+                        let resp = Response.make ~status:`Conflict () in
                         Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid event")
 
                       else if amount <= 0.0 then
@@ -150,7 +150,7 @@ let callback _conn (req : Request.t) (body : Cohttp_lwt.Body.t)
                         let () = Lwt.async (fun () ->
                           post_to_url ~url:cancellation_url ~body_json:(json_of_whole_payload json_obj)
                         ) in
-                        let resp = Response.make ~status:`Bad_request () in
+                        let resp = Response.make ~status:`Conflict () in
                         Lwt.return (resp, Cohttp_lwt.Body.of_string "Invalid amount")
 
                       else
@@ -166,7 +166,7 @@ let callback _conn (req : Request.t) (body : Cohttp_lwt.Body.t)
                       let () = Lwt.async (fun () ->
                         post_to_url ~url:cancellation_url ~body_json:(json_of_whole_payload json_obj)
                       ) in
-                      let resp = Response.make ~status:`Bad_request () in
+                      let resp = Response.make ~status:`Conflict () in
                       Lwt.return (resp, Cohttp_lwt.Body.of_string "Missing fields")
 ;;
 
