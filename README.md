@@ -91,4 +91,11 @@ projeto-webhook-progfunc/
 6. **Verificar o banco de dados**:
     O banco de dados SQLite será criado automaticamente na primeira execução do servidor. Ele estará localizado no diretório `webhook/` para visualização e verificação dos dados persistidos.
 
+## Funcionalidades Implementadas
+- Verificação de integridade do payload recebido.
+- Registro de transações no banco de dados SQLite.
+- Respostas adequadas para diferentes cenários de payload (válido, inválido, campos faltantes).
+- Cancelamento de transações em caso de divergências
+- Confirmação de transações em caso de sucesso.
+
 
