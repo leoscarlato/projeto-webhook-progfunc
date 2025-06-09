@@ -84,6 +84,25 @@ projeto-webhook-progfunc/
       ```bash
       python3 test/test_webhook.py
       ```
+
+    Neste caso, a resposta esperada é de que todos os testes passem, indicando que o Webhook está funcionando conforme o esperado. A resposta esperada quando o script é executado com sucesso é:
+    ```
+    ✅ Confirmação recebida: {'event': 'payment_success', 'transaction_id': 'abc123', 'amount': '49.90', 'currency': 'BRL', 'timestamp': '2023-10-01T12:00:00Z'}
+    1. Webhook test ok: successful!
+    2. Webhook test ok: transação duplicada!
+    ❌ Cancelamento recebido: {'event': 'payment_success', 'transaction_id': 'abc123a', 'amount': '0.00', 'currency': 'BRL', 'timestamp': '2023-10-01T12:00:00Z'}
+    3. Webhook test ok: amount incorreto!
+    4. Webhook test ok: Token Invalido!
+    5. Webhook test ok: Payload Invalido!
+    ❌ Cancelamento recebido: {'event': 'payment_success', 'transaction_id': 'abc123abc', 'amount': '0.00', 'currency': 'BRL'}
+    6. Webhook test ok: Campos ausentes!
+    6/6 tests completed.
+    Confirmações recebidas: ['abc123']
+    Cancelamentos recebidos: ['abc123a', 'abc123abc']
+    ```
+
+    ⚠️ **Importante**: para que os testes funcionem corretamente, o servidor Webhook deve estar rodando em segundo plano, isto é, devem ser usados dois terminais: um para executar o servidor e outro para rodar os testes.
+
     - **Usando ferramentas como Postman ou cURL**:
         É possível enviar requisições HTTP em duas rotas diferentes:
         - `POST /webhook`: Para enviar um payload de transação.
