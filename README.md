@@ -105,7 +105,7 @@ projeto-webhook-progfunc/
 
     - **Usando ferramentas como Postman ou cURL**:
         É possível enviar requisições HTTP em duas rotas diferentes:
-        - `POST /webhook`: Para enviar um payload de transação.
+        - `POST /webhook/`: Para enviar um payload de transação.
         - `GET /`: Para verificar o status do Webhook.
 6. **Verificar o banco de dados**:
     O banco de dados SQLite será criado automaticamente na primeira execução do servidor. Ele estará localizado no diretório `webhook/` para visualização e verificação dos dados persistidos.
