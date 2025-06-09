@@ -117,4 +117,10 @@ projeto-webhook-progfunc/
 - Cancelamento de transações em caso de divergências
 - Confirmação de transações em caso de sucesso.
 
+## ⚠️ Importante
+Para este projeto, foram utilizadas ferramentas de Inteligência Artificial (IA) com os seguintes propósitos:
+- Auxílio na geração de código OCaml.
+- Descrições das funções utilizadas.
+- Correção de erros e sugestões de melhorias.
+
 
