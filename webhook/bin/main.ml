@@ -119,7 +119,7 @@ let callback _conn (req:Request.t) (body:Cohttp_lwt.Body.t)
 
 let () =
   let port = 5000 in
-  Printf.printf "Servidor rodando em http://0.0.0.0:5000%d\n%!" port;
+  Printf.printf "Servidor rodando em http://0.0.0.0:%d\n%!" port;
   Lwt_main.run (
     Server.create
       ~mode:(`TCP (`Port port))
