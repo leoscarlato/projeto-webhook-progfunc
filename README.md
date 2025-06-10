@@ -12,9 +12,9 @@ Características principais:
 - Usa requisições HTTP (geralmente POST)
 - O sistema receptor deve estar pronto para receber e processar a requisição
 
-## Como funciona?
+## Como funciona normalmente?
 1. O Cliente faz uma requisição para iniciar um processo (ex: pagamento) e é redirecionado para a página do Gateway de Pagamento.
-2. O Cliente realiza o pagamento normalmente na forma como desejar (PIX, cartão, etc).
+2. O Cliente realiza o pagamento normalmente na forma como desejar (PIX, cartão, etc.)
 3. Após o pagamento, o site redireciona de volta para a página da loja.
 4. Ao mesmo tempo, o Gateway envia uma requisição no Webhook informando do evento de pagamento.
 5. O webhook é encarregado de confirmar e registrar o pagamento.
